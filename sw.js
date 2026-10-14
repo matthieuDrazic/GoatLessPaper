@@ -1,4 +1,4 @@
-const CACHE='goatlesspaper-v7';
+const CACHE='goatlesspaper-v8';
 const CORE=['./','./index.html','./app.js','./manifest.webmanifest'];
 self.addEventListener('install',event=>{
  event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(CORE)));
