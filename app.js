@@ -28,7 +28,7 @@ function parseTipTagDataMatrix(raw){
 function stop(){
   scanGeneration++;active=false;
   if(frame!==null)cancelAnimationFrame(frame);frame=null;
-  if(reader){try{reader.reset()}catch(e){}reader=null}
+  if(reader){try{reader.controls?.stop();reader.reset?.()}catch(e){}reader=null}
   stream?.getTracks().forEach(t=>t.stop());stream=null;video.srcObject=null;
   if(modal.open)modal.close();target=null;
 }
@@ -82,12 +82,13 @@ async function scan(a,k,el){
       if(!window.ZXingBrowser?.BrowserMultiFormatReader)throw new Error('Bibliothèque de scan indisponible');
       reader=new window.ZXingBrowser.BrowserMultiFormatReader();
       $('#status').textContent='Cadrez nettement le Data Matrix. La caméra reste ouverte tant que le code n’est pas valide.';
+      active=true;
       const controls=await reader.decodeFromVideoDevice(undefined,video,(result,error)=>{
         if(!active||generation!==scanGeneration||!result)return;
         apply(result.getText());
       });
       if(generation!==scanGeneration){controls?.stop();return}
-      reader.controls=controls;active=true;
+      if(reader)reader.controls=controls;
       return;
     }
     stream=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:720}}});
