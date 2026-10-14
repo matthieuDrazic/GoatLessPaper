@@ -128,8 +128,9 @@ async function scan(a,k,el){
     if(available.length)nativeDetector=new BarcodeDetector({formats:available});
    }catch(e){}
   }
-  // Prefer ZXing multi-format reader for iPhone; native support varies by browser.
-  if(nativeDetector && !/iPhone|iPad|iPod/i.test(navigator.userAgent||'')){nativeLoop(id);return}
+  // Prefer the native Data Matrix detector when available, including on iPhone.
+  // If unsupported, fall back to ZXing as before.
+  if(nativeDetector){nativeLoop(id);return}
   status.textContent='Loading the Data Matrix reader…';
   await ensureReader();if(id!==generation)return;
   reader=new window.ZXingBrowser.BrowserMultiFormatReader();
