@@ -19,6 +19,44 @@ $('#import').onclick=()=>$('#csv').click();$('#csv').onchange=async e=>{const fi
 $('#restore').onclick=()=>$('#json').click();$('#json').onchange=async e=>{const file=e.target.files[0];e.target.value='';if(!file)return;try{const j=JSON.parse(await file.text());if(j.format!==K||!Array.isArray(j.animals))throw Error('Format incompatible');if(confirm('Remplacer tout le registre local par cette sauvegarde ?')){data=j.animals.map(norm);save();render()}}catch(err){alert('Restauration impossible : '+err.message)}};
 let target=null,readerPromise=null,reader=null,controls=null,stream=null,nativeDetector=null,scanTimer=null,generation=0,processing=false;
 const overlay=document.querySelector('#scanner'),video=document.querySelector('#scannerVideo'),status=document.querySelector('#scannerStatus');
+const zoomInput=document.querySelector('#scanZoom'),zoomValue=document.querySelector('#scanZoomValue'),zoomHelp=document.querySelector('#scanZoomHelp');
+let cameraZoomTrack=null,softwareZoom=1;
+function activeCameraTrack(){return cameraZoomTrack?.readyState==='live'?cameraZoomTrack:(stream?.getVideoTracks?.()[0]||video.srcObject?.getVideoTracks?.()[0]||null)}
+async function setScannerZoom(requested){
+ const track=activeCameraTrack();
+ const value=Math.max(1,Number(requested)||1);
+ const capabilities=track?.getCapabilities?.()||{};
+ if(track?.applyConstraints&&capabilities.zoom&&Number.isFinite(capabilities.zoom.min)&&Number.isFinite(capabilities.zoom.max)){
+  const zoom=Math.min(capabilities.zoom.max,Math.max(capabilities.zoom.min,value));
+  try{
+   await track.applyConstraints({advanced:[{zoom}]});
+   softwareZoom=1;
+   video.style.transform='';
+   zoomValue.textContent=zoom.toFixed(1)+'×';
+   zoomHelp.textContent='Zoom caméra actif · lecture automatique';
+   return;
+  }catch(e){}
+ }
+ // CSS crop alone cannot improve decoder range: keep feed unmodified.
+ softwareZoom=1;
+ video.style.transform='';
+ zoomInput.value='1';
+ zoomValue.textContent='1×';
+ zoomHelp.textContent='Zoom caméra non disponible sur ce téléphone';
+}
+function configureScannerZoom(){
+ cameraZoomTrack=activeCameraTrack();
+ const caps=cameraZoomTrack?.getCapabilities?.()||{};
+ const supported=!!(cameraZoomTrack?.applyConstraints&&caps.zoom&&Number.isFinite(caps.zoom.max)&&caps.zoom.max>1);
+ zoomInput.disabled=!supported;
+ zoomInput.min=supported?Math.max(1,caps.zoom.min||1):1;
+ zoomInput.max=supported?Math.min(8,caps.zoom.max):1;
+ zoomInput.value=1;
+ zoomValue.textContent='1×';
+ zoomHelp.textContent=supported?'Agrandissez le code sans vous rapprocher':'Zoom caméra non disponible sur ce téléphone';
+ if(supported){setScannerZoom(Math.min(2,Number(zoomInput.max))).then(()=>{zoomInput.value=Math.min(2,Number(zoomInput.max))})}
+}
+zoomInput.addEventListener('input',()=>{setScannerZoom(zoomInput.value)});
 function parseTipTagDataMatrix(raw){
  const match=/^(\d{1,3})\s*FR\s*(0[1-9]|[1-9][0-9])\s*(\d+)$/i.exec(String(raw??'').trim().replace(/[\u001d\u001e\u001f]/g,'').replace(/\s+/g,' '));
  if(!match||Number(match[1])<1||Number(match[1])>999)throw Error('Format attendu : 50 FR 35 576.');
@@ -30,7 +68,7 @@ function closeScanner(){
  try{controls?.stop()}catch(e){}controls=null;
  try{reader?.reset?.()}catch(e){}reader=null;
  stream?.getTracks().forEach(track=>track.stop());stream=null;
- video.pause();video.srcObject=null;overlay.hidden=true;document.body.classList.remove('scanning');target=null;
+ video.pause();video.srcObject=null;cameraZoomTrack=null;video.style.transform='';overlay.hidden=true;document.body.classList.remove('scanning');target=null;
 }
 function applyDecoded(raw){
  if(!target||processing)return false;
@@ -76,9 +114,9 @@ async function scan(a,k,el){
  document.querySelector('#scannerTitle').textContent=k==='tipTag'?'Scanner le Data Matrix':'Scanner l’identifiant électronique';
  if(!navigator.mediaDevices?.getUserMedia){status.textContent='Caméra indisponible : ouvrez l’application en HTTPS.';return}
  try{
-  stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1080}},audio:false});
+  stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:3840},height:{ideal:2160},resizeMode:'none'},audio:false});
   if(id!==generation){stream.getTracks().forEach(t=>t.stop());return}
-  video.srcObject=stream;await video.play();
+  video.srcObject=stream;await video.play();configureScannerZoom();
   status.textContent='Placez le Data Matrix dans le cadre. Lecture automatique…';
   nativeDetector=null;
   if('BarcodeDetector'in window){
@@ -99,6 +137,7 @@ async function scan(a,k,el){
     applyDecoded(result.getText());
   });
   if(id!==generation){controls?.stop();return}
+  if(video.srcObject)configureScannerZoom();
   status.textContent='Placez le Data Matrix dans le cadre. Lecture automatique…';
  }catch(err){
   if(id!==generation)return;
