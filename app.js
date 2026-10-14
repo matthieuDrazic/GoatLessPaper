@@ -54,7 +54,8 @@ function configureScannerZoom(){
  zoomInput.value=1;
  zoomValue.textContent='1×';
  zoomHelp.textContent=supported?'Agrandissez le code sans vous rapprocher':'Zoom caméra non disponible sur ce téléphone';
- if(supported){setScannerZoom(Math.min(2,Number(zoomInput.max))).then(()=>{zoomInput.value=Math.min(2,Number(zoomInput.max))})}
+ // Avoid automatic zoom: it can switch iPhone lenses and reduce close-focus sharpness.
+
 }
 zoomInput.addEventListener('input',()=>{setScannerZoom(zoomInput.value)});
 function parseTipTagDataMatrix(raw){
@@ -114,7 +115,7 @@ async function scan(a,k,el){
  document.querySelector('#scannerTitle').textContent=k==='tipTag'?'Scanner le Data Matrix':'Scanner l’identifiant électronique';
  if(!navigator.mediaDevices?.getUserMedia){status.textContent='Caméra indisponible : ouvrez l’application en HTTPS.';return}
  try{
-  stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:3840},height:{ideal:2160},resizeMode:'none'},audio:false});
+  stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1080}},audio:false});
   if(id!==generation){stream.getTracks().forEach(t=>t.stop());return}
   video.srcObject=stream;await video.play();configureScannerZoom();
   status.textContent='Placez le Data Matrix dans le cadre. Lecture automatique…';
@@ -127,11 +128,12 @@ async function scan(a,k,el){
     if(available.length)nativeDetector=new BarcodeDetector({formats:available});
    }catch(e){}
   }
-  if(nativeDetector){nativeLoop(id);return}
+  // Prefer ZXing multi-format reader for iPhone; native support varies by browser.
+  if(nativeDetector && !/iPhone|iPad|iPod/i.test(navigator.userAgent||'')){nativeLoop(id);return}
   status.textContent='Chargement du lecteur Data Matrix…';
   await ensureReader();if(id!==generation)return;
   reader=new window.ZXingBrowser.BrowserMultiFormatReader();
-  stream.getTracks().forEach(t=>t.stop());stream=null;video.srcObject=null;
+  stream.getTracks().forEach(t=>t.stop());stream=null;video.srcObject=null;cameraZoomTrack=null;
   controls=await reader.decodeFromConstraints({audio:false,video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1080}}},video,(result)=>{
     if(id!==generation||!result||processing)return;
     applyDecoded(result.getText());
