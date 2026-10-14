@@ -20,9 +20,9 @@ $('#restore').onclick=()=>$('#json').click();$('#json').onchange=async e=>{const
 let stream=null,detector=null,frame=null,target=null,active=false,reader=null,scanGeneration=0;
 const modal=$('#modal'),video=$('#video');
 function parseTipTagDataMatrix(raw){
-  const code=String(raw??'').trim().replace(/[\u001d\u001e\u001f]/g,'');
-  const match=/^(00[1-9]|0[1-9][0-9]|[1-9][0-9]{2})FR(0[1-9]|[1-9][0-9])([0-9]+)$/.exec(code);
-  if(!match)throw new Error('Format attendu : 001 à 999 + FR + département 01 à 99 + numéro EDE numérique.');
+  const code=String(raw??'').trim().replace(/[\u001d\u001e\u001f]/g,'').replace(/\s+/g,' ').toUpperCase();
+  const match=/^(\d{1,3})\s*FR\s*(0[1-9]|[1-9][0-9])\s*(\d+)$/.exec(code);
+  if(!match||Number(match[1])<1||Number(match[1])>999)throw new Error('Format attendu : 50 FR 35 576 (Tip Tag de 1 à 999).');
   return {tipTag:match[1],department:match[2],ede:match[3]};
 }
 function stop(){
@@ -63,7 +63,7 @@ async function scan(a,k,el){
   stop();target={a,k,el};const generation=scanGeneration;
   $('#title').textContent=k==='tipTag'?'Scanner le Data Matrix Tip Tag':'Scanner ID électronique';
   $('#status').textContent='Ouverture de la caméra arrière…';
-  $('#manual').value='';$('#manual').placeholder=k==='tipTag'?'Ex. 025FR3512345678':'Identifiant électronique';
+  $('#manual').value='';$('#manual').placeholder=k==='tipTag'?'Ex. 50 FR 35 576':'Identifiant électronique';
   modal.showModal();
   if(!navigator.mediaDevices?.getUserMedia){$('#status').textContent='Caméra inaccessible. Ouvrez l’application en HTTPS ou saisissez le code complet.';return}
   try{
