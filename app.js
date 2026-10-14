@@ -17,10 +17,102 @@ $('#backup').onclick=()=>dl('GoatLessPaper-backup-'+today()+'.json',JSON.stringi
 function parseCsv(s){s=s.replace(/^\ufeff/,'');const out=[];let row=[],v='',quoted=false;for(let i=0;i<s.length;i++){const c=s[i];if(c==='"'){if(quoted&&s[i+1]==='"'){v+='"';i++}else quoted=!quoted}else if(!quoted&&(c===';'||c===',')){row.push(v);v=''}else if(!quoted&&(c==='\r'||c==='\n')){if(c==='\r'&&s[i+1]==='\n')i++;row.push(v);if(row.some(x=>x))out.push(row);row=[];v=''}else v+=c}if(quoted)throw Error('CSV mal formé');row.push(v);if(row.some(x=>x))out.push(row);return out}
 $('#import').onclick=()=>$('#csv').click();$('#csv').onchange=async e=>{const file=e.target.files[0];e.target.value='';if(!file)return;try{const rows=parseCsv(await file.text());if(!rows.length||H.some((h,i)=>h!==rows[0][i]))throw Error('En-têtes CSV incompatibles');const added=rows.slice(1).map(r=>norm(Object.fromEntries(F.map((k,i)=>[k,r[i]||'']))));if(confirm('Ajouter '+added.length+' animaux ?')){data.push(...added);save();render()}}catch(err){alert('Import impossible : '+err.message)}};
 $('#restore').onclick=()=>$('#json').click();$('#json').onchange=async e=>{const file=e.target.files[0];e.target.value='';if(!file)return;try{const j=JSON.parse(await file.text());if(j.format!==K||!Array.isArray(j.animals))throw Error('Format incompatible');if(confirm('Remplacer tout le registre local par cette sauvegarde ?')){data=j.animals.map(norm);save();render()}}catch(err){alert('Restauration impossible : '+err.message)}};
-let stream=null,detector=null,frame=null,target=null,active=false;const modal=$('#modal'),video=$('#video');
-function stop(){active=false;if(frame!==null)cancelAnimationFrame(frame);frame=null;stream?.getTracks().forEach(t=>t.stop());stream=null;video.srcObject=null;if(modal.open)modal.close();target=null}
-function apply(value){if(!target)return;const val=String(value).trim();if(!val)return;target.a[target.k]=val;target.el.value=val;save();stop()}
-async function loop(){if(!active)return;try{if(video.readyState>=2){const codes=await detector.detect(video);if(!active)return;if(codes.length){apply(codes[0].rawValue);return}}}catch(e){$('#status').textContent='Lecture impossible : saisissez le numéro.'}if(active)frame=requestAnimationFrame(loop)}
-async function scan(a,k,el){target={a,k,el};$('#title').textContent='Scanner '+(k==='tipTag'?'ID Tip Tag':'ID électronique');$('#status').textContent='Cadrez le QR code.';$('#manual').value='';modal.showModal();if(!navigator.mediaDevices?.getUserMedia||!('BarcodeDetector'in window)){$('#status').textContent='Scanner QR non pris en charge ici. Utilisez la saisie manuelle.';return}try{if(!(await BarcodeDetector.getSupportedFormats()).includes('qr_code'))throw Error('QR non supporté');detector=new BarcodeDetector({formats:['qr_code']});stream=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:'environment'}}});if(!modal.open){stream.getTracks().forEach(t=>t.stop());stream=null;return}video.srcObject=stream;await video.play();active=true;loop()}catch(e){stream?.getTracks().forEach(t=>t.stop());stream=null;$('#status').textContent='Caméra indisponible : '+e.message}}
-$('#validate').onclick=()=>apply($('#manual').value);$('#manual').onkeydown=e=>{if(e.key==='Enter')apply(e.currentTarget.value)};$('#close').onclick=stop;modal.addEventListener('cancel',e=>{e.preventDefault();stop()});render();
+let stream=null,detector=null,frame=null,target=null,active=false,reader=null,scanGeneration=0;
+const modal=$('#modal'),video=$('#video');
+function parseTipTagDataMatrix(raw){
+  const code=String(raw??'').trim().replace(/[\u001d\u001e\u001f]/g,'');
+  const match=/^(00[1-9]|0[1-9][0-9]|[1-9][0-9]{2})FR(0[1-9]|[1-9][0-9])([0-9]+)$/.exec(code);
+  if(!match)throw new Error('Format attendu : 001 à 999 + FR + département 01 à 99 + numéro EDE numérique.');
+  return {tipTag:match[1],department:match[2],ede:match[3]};
+}
+function stop(){
+  scanGeneration++;active=false;
+  if(frame!==null)cancelAnimationFrame(frame);frame=null;
+  if(reader){try{reader.reset()}catch(e){}reader=null}
+  stream?.getTracks().forEach(t=>t.stop());stream=null;video.srcObject=null;
+  if(modal.open)modal.close();target=null;
+}
+function apply(value){
+  if(!target)return;
+  const val=String(value??'').trim();if(!val)return;
+  if(target.k==='tipTag'){
+    let parsed;
+    try{parsed=parseTipTagDataMatrix(val)}catch(e){$('#status').textContent='⚠ '+e.message;return}
+    const duplicates=data.filter(a=>a!==target.a&&a.tipTag===parsed.tipTag&&a.ede===parsed.ede);
+    if(duplicates.length&&!confirm('Un animal possède déjà ce Tip Tag et cet EDE. Continuer ?'))return;
+    if(target.a.ede&&target.a.ede!==parsed.ede&&!confirm('Le numéro EDE existant sera remplacé par celui du Data Matrix. Confirmer ?'))return;
+    target.a.tipTag=parsed.tipTag;target.a.ede=parsed.ede;target.el.value=parsed.tipTag;
+    const tr=target.el.closest('tr');if(tr){const edeInput=tr.children[3]?.querySelector('input');if(edeInput)edeInput.value=parsed.ede}
+  }else{
+    target.a[target.k]=val;target.el.value=val;
+  }
+  save();stop();
+}
+async function loop(generation){
+  if(!active||generation!==scanGeneration)return;
+  try{
+    if(video.readyState>=2){
+      const found=await detector.detect(video);
+      if(!active||generation!==scanGeneration)return;
+      if(found.length){apply(found[0].rawValue);if(!active)return}
+    }
+  }catch(e){$('#status').textContent='Détection interrompue : '+e.message}
+  if(active&&generation===scanGeneration)frame=requestAnimationFrame(()=>loop(generation));
+}
+async function scan(a,k,el){
+  stop();target={a,k,el};const generation=scanGeneration;
+  $('#title').textContent=k==='tipTag'?'Scanner le Data Matrix Tip Tag':'Scanner ID électronique';
+  $('#status').textContent='Ouverture de la caméra arrière…';
+  $('#manual').value='';$('#manual').placeholder=k==='tipTag'?'Ex. 025FR3512345678':'Identifiant électronique';
+  modal.showModal();
+  if(!navigator.mediaDevices?.getUserMedia){$('#status').textContent='Caméra inaccessible. Ouvrez l’application en HTTPS ou saisissez le code complet.';return}
+  try{
+    const supportsNative='BarcodeDetector' in window;
+    if(supportsNative){
+      const formats=await BarcodeDetector.getSupportedFormats();
+      const format=k==='tipTag'?'data_matrix':(formats.includes('data_matrix')?'data_matrix':'qr_code');
+      if(formats.includes(format))detector=new BarcodeDetector({formats:[format]});
+      else detector=null;
+    }else detector=null;
+    if(generation!==scanGeneration)return;
+    if(!detector){
+      $('#status').textContent='Initialisation du lecteur Data Matrix compatible iPhone…';
+      await ensureZxing();
+      if(generation!==scanGeneration)return;
+      if(!window.ZXingBrowser?.BrowserMultiFormatReader)throw new Error('Bibliothèque de scan indisponible');
+      reader=new window.ZXingBrowser.BrowserMultiFormatReader();
+      $('#status').textContent='Cadrez nettement le Data Matrix. La caméra reste ouverte tant que le code n’est pas valide.';
+      const controls=await reader.decodeFromVideoDevice(undefined,video,(result,error)=>{
+        if(!active||generation!==scanGeneration||!result)return;
+        apply(result.getText());
+      });
+      if(generation!==scanGeneration){controls?.stop();return}
+      reader.controls=controls;active=true;
+      return;
+    }
+    stream=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:720}}});
+    if(generation!==scanGeneration){stream.getTracks().forEach(t=>t.stop());stream=null;return}
+    video.srcObject=stream;await video.play();active=true;
+    $('#status').textContent=k==='tipTag'?'Cadrez le Data Matrix, pas un QR code.':'Cadrez le code de l’identifiant électronique.';
+    loop(generation);
+  }catch(e){stream?.getTracks().forEach(t=>t.stop());stream=null;$('#status').textContent='Scan impossible : '+e.message+'. Saisie manuelle disponible.'}
+}
+let zxingPromise=null;
+function ensureZxing(){
+  if(window.ZXingBrowser?.BrowserMultiFormatReader)return Promise.resolve();
+  if(zxingPromise)return zxingPromise;
+  zxingPromise=new Promise((resolve,reject)=>{
+    const script=document.createElement('script');
+    script.src='https://unpkg.com/@zxing/browser@0.1.5/umd/zxing-browser.min.js';
+    script.onload=resolve;script.onerror=()=>reject(new Error('Impossible de charger le lecteur Data Matrix (connexion requise lors du premier scan)'));
+    document.head.append(script);
+  }).catch(e=>{zxingPromise=null;throw e});
+  return zxingPromise;
+}
+$('#validate').onclick=()=>apply($('#manual').value);
+$('#manual').onkeydown=e=>{if(e.key==='Enter')apply(e.currentTarget.value)};
+$('#close').onclick=stop;
+modal.addEventListener('cancel',e=>{e.preventDefault();stop()});
+render();
+
 if('serviceWorker' in navigator)window.addEventListener('load',()=>navigator.serviceWorker.register('./sw.js').catch(console.warn));
