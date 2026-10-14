@@ -2,10 +2,10 @@
 const F=['tipTag','electronicId','ede','birthDate','sex','motherId','fatherId','litterSize','healthNotes'];
 const H=['ID Tip Tag','ID électronique','EDE élevage','Date de naissance','Sexe','ID mère','ID père','Chevreaux / portée','Observations sanitaires'];
 const K='goatlesspaper-v1',$=s=>document.querySelector(s);
-const uid=()=>crypto.randomUUID?.()||String(Date.now())+Math.random();
+const uid=()=>globalThis.crypto?.randomUUID?.()||String(Date.now())+Math.random();
 const norm=a=>Object.fromEntries([['_id',a._id||uid()],...F.map(k=>[k,String(a[k]??'')])]);
 let data=[];try{const v=JSON.parse(localStorage.getItem(K)||'[]');if(Array.isArray(v))data=v.map(norm)}catch(e){alert('Stockage local illisible. Restaurez une sauvegarde.')}
-function save(){updateDashboard();try{localStorage.setItem(K,JSON.stringify(data))}catch(e){alert('Stockage local indisponible. Exportez vos données.');}}
+function save(){try{localStorage.setItem(K,JSON.stringify(data))}catch(e){alert('Stockage local indisponible. Exportez vos données.');}updateDashboard();}
 function cell(a,k){const w=document.createElement('div');if(k==='tipTag'||k==='electronicId')w.className='scan';const el=k==='healthNotes'?document.createElement('textarea'):k==='sex'?document.createElement('select'):document.createElement('input');if(k==='sex'){for(const[v,t]of[['','—'],['F','Femelle'],['M','Mâle'],['I','Indéterminé']]){const o=document.createElement('option');o.value=v;o.textContent=t;el.append(o)}}else if(k!=='healthNotes'){el.type=k==='birthDate'?'date':k==='litterSize'?'number':'text';if(k==='litterSize'){el.min='0';el.step='1'}}el.value=a[k];el.setAttribute('aria-label',H[F.indexOf(k)]);el.addEventListener('input',()=>{a[k]=el.value;save()});w.append(el);if(k==='tipTag'||k==='electronicId'){const b=document.createElement('button');b.textContent='📷';b.title='Scanner '+H[F.indexOf(k)];b.onclick=()=>scan(a,k,el);w.append(b)}return w}
 function render(){const q=$('#search').value.toLowerCase(),body=$('#rows');body.replaceChildren();for(const a of data.filter(a=>F.some(k=>a[k].toLowerCase().includes(q)))){const tr=document.createElement('tr'),n=document.createElement('td');n.textContent=data.indexOf(a)+1;tr.append(n);for(const k of F){const td=document.createElement('td');td.append(cell(a,k));tr.append(td)}const td=document.createElement('td'),b=document.createElement('button');b.textContent='Supprimer';b.onclick=()=>{if(confirm('Supprimer cet animal ?')){data=data.filter(x=>x!==a);save();render()}};td.append(b);tr.append(td);body.append(tr)}$('#count').textContent=data.length+' animaux';updateDashboard()}
 $('#add').onclick=()=>{data.push(norm({}));save();$('#search').value='';render()};$('#search').oninput=render;
@@ -125,13 +125,13 @@ function updateDashboard(){
  if(!data.length)recent.textContent='Aucun animal enregistré.';
 }
 function showTab(tab){
- for(const id of ['dashboard','herd','settingsPanel'])document.getElementById(id).hidden=id!==tab;
+ for(const id of ['dashboard','herd','settingsPanel']){const section=document.getElementById(id);if(section)section.hidden=id!==tab;}
  document.querySelectorAll('.tabbar button').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));
 }
 document.querySelectorAll('.tabbar button').forEach(b=>b.addEventListener('click',()=>{
  if(b.dataset.tab==='scan'){
   showTab('herd');
-  if(data.length){const a=data[data.length-1];const row=[...document.querySelectorAll('#rows tr')].find(tr=>tr.querySelector('input')?.value===a.tipTag);const input=row?.querySelector('input');if(input)scan(a,'tipTag',input);else alert('Effacez la recherche pour scanner une chèvre.');}
+  if(data.length){document.querySelector('#search').value='';render();const a=data[data.length-1];const row=[...document.querySelectorAll('#rows tr')].at(-1);const input=row?.querySelector('input');if(input)scan(a,'tipTag',input);else alert('Impossible de préparer le scanner.');}
   else{document.querySelector('#add').click();const a=data[data.length-1];const input=document.querySelector('#rows tr:last-child input');if(input)scan(a,'tipTag',input)}
   return;
  }
@@ -140,6 +140,7 @@ document.querySelectorAll('.tabbar button').forEach(b=>b.addEventListener('click
 document.querySelector('#goHerd').onclick=()=>showTab('herd');
 document.querySelector('#settingsExport').onclick=()=>document.querySelector('#export').click();
 document.querySelector('#settingsBackup').onclick=()=>document.querySelector('#backup').click();
+window.addEventListener('error',e=>{console.error('GoatLessPaper:',e.error||e.message)});
 showTab('dashboard');
 
 render();
