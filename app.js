@@ -7,7 +7,7 @@ const norm=a=>Object.fromEntries([['_id',a._id||uid()],...F.map(k=>[k,String(a[k
 let data=[];try{const v=JSON.parse(localStorage.getItem(K)||'[]');if(Array.isArray(v))data=v.map(norm)}catch(e){alert('Local data cannot be read. Restore a backup.')}
 function save(){try{localStorage.setItem(K,JSON.stringify(data))}catch(e){alert('Local storage is unavailable. Export your data.');}updateDashboard();}
 function cell(a,k){const w=document.createElement('div');if(k==='tipTag'||k==='electronicId')w.className='scan';const el=k==='healthNotes'?document.createElement('textarea'):k==='sex'?document.createElement('select'):document.createElement('input');if(k==='sex'){for(const[v,t]of[['','—'],['F','Female'],['M','Male'],['I','Unknown']]){const o=document.createElement('option');o.value=v;o.textContent=t;el.append(o)}}else if(k!=='healthNotes'){el.type=k==='birthDate'?'date':k==='litterSize'?'number':'text';if(k==='litterSize'){el.min='0';el.step='1'}}el.value=a[k];el.setAttribute('aria-label',H[F.indexOf(k)]);el.addEventListener('input',()=>{a[k]=el.value;save()});w.append(el);if(k==='tipTag'||k==='electronicId'){const b=document.createElement('button');b.textContent='📷';b.title='Scan '+H[F.indexOf(k)];b.onclick=()=>scan(a,k,el);w.append(b)}return w}
-function render(){const q=$('#search').value.toLowerCase(),body=$('#rows');body.replaceChildren();for(const a of data.filter(a=>F.some(k=>a[k].toLowerCase().includes(q)))){const tr=document.createElement('tr'),n=document.createElement('td');n.textContent=data.indexOf(a)+1;tr.append(n);for(const k of F){const td=document.createElement('td');td.append(cell(a,k));tr.append(td)}const td=document.createElement('td'),b=document.createElement('button');b.textContent='Delete';b.onclick=()=>{if(confirm('Delete cet animal ?')){data=data.filter(x=>x!==a);save();render()}};td.append(b);tr.append(td);body.append(tr)}$('#count').textContent=data.length+' animals';updateDashboard()}
+function render(){const q=$('#search').value.toLowerCase(),body=$('#rows');body.replaceChildren();for(const a of data.filter(a=>F.some(k=>a[k].toLowerCase().includes(q)))){const tr=document.createElement('tr'),n=document.createElement('td');n.textContent=data.indexOf(a)+1;tr.append(n);for(const k of F){const td=document.createElement('td');td.append(cell(a,k));tr.append(td)}const td=document.createElement('td'),b=document.createElement('button');b.textContent='Delete';b.onclick=()=>{if(confirm('Delete this animal?')){data=data.filter(x=>x!==a);save();render()}};td.append(b);tr.append(td);body.append(tr)}$('#count').textContent=data.length+' animals';updateDashboard()}
 $('#add').onclick=()=>{data.push(norm({}));save();$('#search').value='';render()};$('#search').oninput=render;
 const today=()=>new Date().toISOString().slice(0,10);
 function dl(name,contents,type){const url=URL.createObjectURL(new Blob([contents],{type})),a=document.createElement('a');a.href=url;a.download=name;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000)}
@@ -112,7 +112,7 @@ async function nativeLoop(id){
 async function scan(a,k,el){
  closeScanner();target={a,k,el};const id=generation;
  overlay.hidden=false;document.body.classList.add('scanning');status.textContent='Starting the rear camera…';
- document.querySelector('#scannerTitle').textContent=k==='tipTag'?'Scan le Data Matrix':'Scan l’identifiant électronique';
+ document.querySelector('#scannerTitle').textContent=k==='tipTag'?'Scan the Data Matrix':'Scan electronic ID';
  if(!navigator.mediaDevices?.getUserMedia){status.textContent='Camera unavailable. Open the app over HTTPS.';return}
  try{
   stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1080}},audio:false});
@@ -163,7 +163,7 @@ function updateDashboard(){
   const detail=document.createElement('span');detail.textContent='EDE '+(a.ede||'—')+' · '+(a.sex==='F'?'Female':a.sex==='M'?'Male':'Sex not specified');
   row.append(label,detail);recent.append(row);
  }
- if(!data.length)recent.textContent='Aucun animal enregistré.';
+ if(!data.length)recent.textContent='No animals recorded yet.';
 }
 function showTab(tab){
  for(const id of ['dashboard','herd','settingsPanel']){const section=document.getElementById(id);if(section)section.hidden=id!==tab;}
