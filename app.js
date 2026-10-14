@@ -17,79 +17,98 @@ $('#backup').onclick=()=>dl('GoatLessPaper-backup-'+today()+'.json',JSON.stringi
 function parseCsv(s){s=s.replace(/^\ufeff/,'');const out=[];let row=[],v='',quoted=false;for(let i=0;i<s.length;i++){const c=s[i];if(c==='"'){if(quoted&&s[i+1]==='"'){v+='"';i++}else quoted=!quoted}else if(!quoted&&(c===';'||c===',')){row.push(v);v=''}else if(!quoted&&(c==='\r'||c==='\n')){if(c==='\r'&&s[i+1]==='\n')i++;row.push(v);if(row.some(x=>x))out.push(row);row=[];v=''}else v+=c}if(quoted)throw Error('CSV mal formé');row.push(v);if(row.some(x=>x))out.push(row);return out}
 $('#import').onclick=()=>$('#csv').click();$('#csv').onchange=async e=>{const file=e.target.files[0];e.target.value='';if(!file)return;try{const rows=parseCsv(await file.text());if(!rows.length||H.some((h,i)=>h!==rows[0][i]))throw Error('En-têtes CSV incompatibles');const added=rows.slice(1).map(r=>norm(Object.fromEntries(F.map((k,i)=>[k,r[i]||'']))));if(confirm('Ajouter '+added.length+' animaux ?')){data.push(...added);save();render()}}catch(err){alert('Import impossible : '+err.message)}};
 $('#restore').onclick=()=>$('#json').click();$('#json').onchange=async e=>{const file=e.target.files[0];e.target.value='';if(!file)return;try{const j=JSON.parse(await file.text());if(j.format!==K||!Array.isArray(j.animals))throw Error('Format incompatible');if(confirm('Remplacer tout le registre local par cette sauvegarde ?')){data=j.animals.map(norm);save();render()}}catch(err){alert('Restauration impossible : '+err.message)}};
-let target=null,readerPromise=null,scanGeneration=0;
-const cameraInput=document.querySelector('#cameraCapture');
+let target=null,readerPromise=null,reader=null,controls=null,stream=null,nativeDetector=null,scanTimer=null,generation=0,processing=false;
+const overlay=document.querySelector('#scanner'),video=document.querySelector('#scannerVideo'),status=document.querySelector('#scannerStatus');
 function parseTipTagDataMatrix(raw){
-  const code=String(raw??'').trim().replace(/[\u001d\u001e\u001f]/g,'').replace(/\s+/g,' ').toUpperCase();
-  const match=/^(\d{1,3})\s*FR\s*(0[1-9]|[1-9][0-9])\s*(\d+)$/.exec(code);
-  if(!match||Number(match[1])<1||Number(match[1])>999)throw Error('Format attendu : 50 FR 35 576.');
-  return {tipTag:match[1],department:match[2],ede:match[3]};
+ const match=/^(\d{1,3})\s*FR\s*(0[1-9]|[1-9][0-9])\s*(\d+)$/i.exec(String(raw??'').trim().replace(/[\u001d\u001e\u001f]/g,'').replace(/\s+/g,' '));
+ if(!match||Number(match[1])<1||Number(match[1])>999)throw Error('Format attendu : 50 FR 35 576.');
+ return {tipTag:match[1],department:match[2],ede:match[3]};
 }
-function apply(value){
-  if(!target)return false;
-  const val=String(value??'').trim();if(!val)return false;
-  const {a,k,el}=target;
-  if(k==='tipTag'){
-    let p;
-    try{p=parseTipTagDataMatrix(val)}catch(e){alert('Data Matrix non valide : '+e.message);return false}
-    if(data.some(row=>row!==a&&row.tipTag===p.tipTag&&row.ede===p.ede)&&!confirm('Cet identifiant existe déjà. Enregistrer quand même ?'))return false;
-    if(a.ede&&a.ede!==p.ede&&!confirm('Remplacer le numéro EDE existant ?'))return false;
-    a.tipTag=p.tipTag;a.ede=p.ede;el.value=p.tipTag;
-    const edeInput=el.closest('tr')?.children[3]?.querySelector('input');if(edeInput)edeInput.value=p.ede;
-  }else{a[k]=val;el.value=val}
-  save();target=null;return true;
+function closeScanner(){
+ generation++;processing=false;
+ if(scanTimer!==null){clearTimeout(scanTimer);scanTimer=null}
+ try{controls?.stop()}catch(e){}controls=null;
+ try{reader?.reset?.()}catch(e){}reader=null;
+ stream?.getTracks().forEach(track=>track.stop());stream=null;
+ video.pause();video.srcObject=null;overlay.hidden=true;document.body.classList.remove('scanning');target=null;
+}
+function applyDecoded(raw){
+ if(!target||processing)return false;
+ let parsed=null;
+ if(target.k==='tipTag'){
+  try{parsed=parseTipTagDataMatrix(raw)}catch(e){status.textContent='Code détecté, mais format différent de 50 FR 35 576. Réessayez.';return false}
+ }
+ processing=true;
+ const {a,k,el}=target;
+ if(parsed){
+  if(data.some(x=>x!==a&&x.tipTag===parsed.tipTag&&x.ede===parsed.ede)&&!confirm('Un animal possède déjà ce Tip Tag et cet EDE. Continuer ?')){processing=false;return false}
+  if(a.ede&&a.ede!==parsed.ede&&!confirm('Remplacer le numéro EDE existant ?')){processing=false;return false}
+  a.tipTag=parsed.tipTag;a.ede=parsed.ede;el.value=parsed.tipTag;
+  const edeField=el.closest('tr')?.children[3]?.querySelector('input');if(edeField)edeField.value=parsed.ede;
+ }else{a[k]=String(raw).trim();el.value=a[k]}
+ save();if(navigator.vibrate)navigator.vibrate(75);closeScanner();return true;
 }
 function ensureReader(){
-  if(window.ZXingBrowser?.BrowserMultiFormatReader)return Promise.resolve();
-  if(readerPromise)return readerPromise;
-  readerPromise=new Promise((resolve,reject)=>{
-    const script=document.createElement('script');
-    script.src='https://unpkg.com/@zxing/browser@0.1.5/umd/zxing-browser.min.js';
-    script.onload=resolve;script.onerror=()=>reject(Error('Lecteur Data Matrix indisponible. Vérifiez la connexion internet.'));
-    document.head.append(script);
-  }).catch(e=>{readerPromise=null;throw e});
-  return readerPromise;
+ if(window.ZXingBrowser?.BrowserMultiFormatReader)return Promise.resolve();
+ if(readerPromise)return readerPromise;
+ readerPromise=new Promise((resolve,reject)=>{
+  const script=document.createElement('script');
+  script.src='https://unpkg.com/@zxing/browser@0.1.5/umd/zxing-browser.min.js';
+  script.onload=resolve;script.onerror=()=>reject(Error('Le moteur de lecture est indisponible. Vérifiez la connexion.'));
+  document.head.append(script);
+ }).catch(err=>{readerPromise=null;throw err});
+ return readerPromise;
 }
-function scan(a,k,el){
-  target={a,k,el};scanGeneration++;
-  // capture=environment délègue l'ouverture de l'appareil photo à iOS/Android.
-  cameraInput.value='';
-  cameraInput.click();
-}
-cameraInput.addEventListener('change',async e=>{
-  const file=e.target.files?.[0];e.target.value='';
-  if(!file||!target)return;
-  const generation=scanGeneration;
-  try{
-    const source=await createImageBitmap(file).catch(()=>null);
-    if(generation!==scanGeneration)return;
-    let decoded=null;
-    if(source&&'BarcodeDetector'in window){
-      const formats=await BarcodeDetector.getSupportedFormats();
-      const format=target.k==='tipTag'?'data_matrix':'qr_code';
-      if(formats.includes(format)){
-        const detector=new BarcodeDetector({formats:[format]});
-        decoded=(await detector.detect(source))[0]?.rawValue??null;
-      }
-    }
-    source?.close?.();
-    if(!decoded){
-      await ensureReader();
-      if(generation!==scanGeneration)return;
-      const reader=new window.ZXingBrowser.BrowserMultiFormatReader();
-      const url=URL.createObjectURL(file);
-      try{
-        const img=new Image();img.src=url;await img.decode();
-        decoded=(await reader.decodeFromImageElement(img)).getText();
-      }finally{URL.revokeObjectURL(url)}
-    }
-    if(generation!==scanGeneration)return;
-    if(!apply(decoded))alert('Le code n’a pas été enregistré. Reprenez une photo ou saisissez-le manuellement.');
-  }catch(err){
-    if(generation!==scanGeneration)return;
-    alert('Data Matrix non reconnu sur cette photo. Cadrez le carré nettement, rapprochez-vous et évitez les reflets. Détail : '+err.message);
+async function nativeLoop(id){
+ if(id!==generation||!nativeDetector||!overlay||overlay.hidden)return;
+ try{
+  if(video.readyState>=2&&!processing){
+   const codes=await nativeDetector.detect(video);
+   if(id!==generation)return;
+   for(const result of codes){if(applyDecoded(result.rawValue))return}
   }
-});
+ }catch(e){status.textContent='Recherche du Data Matrix…'}
+ if(id===generation)scanTimer=setTimeout(()=>nativeLoop(id),180);
+}
+async function scan(a,k,el){
+ closeScanner();target={a,k,el};const id=generation;
+ overlay.hidden=false;document.body.classList.add('scanning');status.textContent='Activation de la caméra arrière…';
+ document.querySelector('#scannerTitle').textContent=k==='tipTag'?'Scanner le Data Matrix':'Scanner l’identifiant électronique';
+ if(!navigator.mediaDevices?.getUserMedia){status.textContent='Caméra indisponible : ouvrez l’application en HTTPS.';return}
+ try{
+  stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1080}},audio:false});
+  if(id!==generation){stream.getTracks().forEach(t=>t.stop());return}
+  video.srcObject=stream;await video.play();
+  status.textContent='Placez le Data Matrix dans le cadre. Lecture automatique…';
+  nativeDetector=null;
+  if('BarcodeDetector'in window){
+   try{
+    const formats=await BarcodeDetector.getSupportedFormats();
+    const formatsWanted=k==='tipTag'?['data_matrix']:['data_matrix','qr_code'];
+    const available=formatsWanted.filter(format=>formats.includes(format));
+    if(available.length)nativeDetector=new BarcodeDetector({formats:available});
+   }catch(e){}
+  }
+  if(nativeDetector){nativeLoop(id);return}
+  status.textContent='Chargement du lecteur Data Matrix…';
+  await ensureReader();if(id!==generation)return;
+  reader=new window.ZXingBrowser.BrowserMultiFormatReader();
+  stream.getTracks().forEach(t=>t.stop());stream=null;video.srcObject=null;
+  controls=await reader.decodeFromConstraints({audio:false,video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1080}}},video,(result)=>{
+    if(id!==generation||!result||processing)return;
+    applyDecoded(result.getText());
+  });
+  if(id!==generation){controls?.stop();return}
+  status.textContent='Placez le Data Matrix dans le cadre. Lecture automatique…';
+ }catch(err){
+  if(id!==generation)return;
+  stream?.getTracks().forEach(t=>t.stop());stream=null;
+  status.textContent='Lecture indisponible : '+err.message+'. Fermez puis réessayez.';
+ }
+}
+document.querySelector('#scannerClose').addEventListener('click',closeScanner);
+document.addEventListener('visibilitychange',()=>{if(document.hidden&&!overlay.hidden)closeScanner()});
+
 render();
 
 if('serviceWorker' in navigator)window.addEventListener('load',()=>navigator.serviceWorker.register('./sw.js').catch(console.warn));
