@@ -15,7 +15,7 @@ function esc(v){v=String(v??'');return /[";\r\n]/.test(v)?'"'+v.replaceAll('"','
 $('#export').onclick=()=>dl('GoatLessPaper-'+today()+'.csv','\ufeff'+[H,...data.map(a=>F.map(k=>a[k]))].map(r=>r.map(esc).join(';')).join('\r\n'),'text/csv;charset=utf-8');
 $('#backup').onclick=()=>dl('GoatLessPaper-backup-'+today()+'.json',JSON.stringify({format:K,animals:data},null,2),'application/json');
 function parseCsv(s){s=s.replace(/^\ufeff/,'');const out=[];let row=[],v='',quoted=false;for(let i=0;i<s.length;i++){const c=s[i];if(c==='"'){if(quoted&&s[i+1]==='"'){v+='"';i++}else quoted=!quoted}else if(!quoted&&(c===';'||c===',')){row.push(v);v=''}else if(!quoted&&(c==='\r'||c==='\n')){if(c==='\r'&&s[i+1]==='\n')i++;row.push(v);if(row.some(x=>x))out.push(row);row=[];v=''}else v+=c}if(quoted)throw Error('Invalid CSV file');row.push(v);if(row.some(x=>x))out.push(row);return out}
-$('#import').onclick=()=>$('#csv').click();$('#csv').onchange=async e=>{const file=e.target.files[0];e.target.value='';if(!file)return;try{const rows=parseCsv(await file.text());if(!rows.length||H.some((h,i)=>h!==rows[0][i]))throw Error('CSV headers do not match');const added=rows.slice(1).map(r=>norm(Object.fromEntries(F.map((k,i)=>[k,r[i]||'']))));if(confirm('Add '+added.length+' animals ?')){data.push(...added);save();render()}}catch(err){alert('Import failed: '+err.message)}};
+$('#import').onclick=()=>$('#csv').click();$('#csv').onchange=async e=>{const file=e.target.files[0];e.target.value='';if(!file)return;try{const rows=parseCsv(await file.text());if(!rows.length||H.some((h,i)=>h!==rows[0][i]))throw Error('CSV headers do not match');const added=rows.slice(1).map(r=>norm(Object.fromEntries(F.map((k,i)=>[k,r[i]||'']))));if(confirm('Add '+added.length+' animals?')){data.push(...added);save();render()}}catch(err){alert('Import failed: '+err.message)}};
 $('#restore').onclick=()=>$('#json').click();$('#json').onchange=async e=>{const file=e.target.files[0];e.target.value='';if(!file)return;try{const j=JSON.parse(await file.text());if(j.format!==K||!Array.isArray(j.animals))throw Error('Incompatible backup format');if(confirm('Replace all local records with this backup?')){data=j.animals.map(norm);save();render()}}catch(err){alert('Restore failed: '+err.message)}};
 let target=null,readerPromise=null,reader=null,controls=null,stream=null,nativeDetector=null,scanTimer=null,generation=0,processing=false;
 const overlay=document.querySelector('#scanner'),video=document.querySelector('#scannerVideo'),status=document.querySelector('#scannerStatus');
@@ -60,7 +60,7 @@ function configureScannerZoom(){
 zoomInput.addEventListener('input',()=>{setScannerZoom(zoomInput.value)});
 function parseTipTagDataMatrix(raw){
  const match=/^(\d{1,3})\s*FR\s*(0[1-9]|[1-9][0-9])\s*(\d+)$/i.exec(String(raw??'').trim().replace(/[\u001d\u001e\u001f]/g,'').replace(/\s+/g,' '));
- if(!match||Number(match[1])<1||Number(match[1])>999)throw Error('Format attendu : 50 FR 35 576.');
+ if(!match||Number(match[1])<1||Number(match[1])>999)throw Error('Expected format: 50 FR 35 576.');
  return {tipTag:match[1],department:match[2],ede:match[3]};
 }
 function closeScanner(){
